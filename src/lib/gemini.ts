@@ -7,7 +7,7 @@ if (!GEMINI_API_KEY) {
 }
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-8b" })
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
 
 function splitTextIntoChunks(text: string): string[] {
   // 문장 단위로 텍스트 분할

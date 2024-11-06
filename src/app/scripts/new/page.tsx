@@ -1,9 +1,5 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import NewScriptForm from '@/components/scripts/new-script-form'
-
 export default function NewScriptPage() {
   return (
     <main className="container mx-auto px-4 py-8">

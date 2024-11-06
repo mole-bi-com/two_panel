@@ -3,8 +3,6 @@
 interface DualPanelViewerProps {
   originalText: string
   translatedText: string
-  currentChunk?: number
-  totalChunks?: number
   chunks?: {
     original: string
     translated: string
@@ -14,8 +12,6 @@ interface DualPanelViewerProps {
 export default function DualPanelViewer({
   originalText,
   translatedText,
-  currentChunk = 0,
-  totalChunks = 0,
   chunks = []
 }: DualPanelViewerProps) {
   return (

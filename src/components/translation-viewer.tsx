@@ -452,7 +452,7 @@ Important:
     translateChunks();
   }, [script.id]);
 
-  // 문단 선택 핸들러
+  // 문단 선택 핸들러 개선
   const handleParagraphClick = (id: number, isSource: boolean) => {
     console.log('Paragraph clicked:', { id, isSource });
     
@@ -469,11 +469,23 @@ Important:
       return { source: newSource, target: newTarget };
     });
 
-    // 선택된 문단이 뷰포트 안에 있도록 스크롤
-    const elementId = isSource ? `target-${id}` : `source-${id}`;
-    const element = document.getElementById(elementId);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // 선택된 문단을 양쪽 패널의 상단으로 스크롤
+    const sourceElement = document.getElementById(`source-${id}`);
+    const targetElement = document.getElementById(`target-${id}`);
+    const sourceContainer = document.querySelector('.source-container');
+    const targetContainer = document.querySelector('.target-container');
+
+    if (sourceElement && targetElement && sourceContainer && targetContainer) {
+      // 부드러운 스크롤 효과
+      sourceContainer.scrollTo({
+        top: sourceElement.offsetTop - sourceContainer.offsetTop - 20, // 20px 여백
+        behavior: 'smooth'
+      });
+
+      targetContainer.scrollTo({
+        top: targetElement.offsetTop - targetContainer.offsetTop - 20, // 20px 여백
+        behavior: 'smooth'
+      });
     }
   };
 
@@ -539,7 +551,7 @@ Important:
                 label="원문"
               />
             </div>
-            <div className="prose max-w-none">
+            <div className="source-container prose max-w-none h-[600px] overflow-y-auto">
               {mappedParagraphs.source.map(paragraph => (
                 <ParagraphBlock
                   key={`source-${paragraph.id}`}
@@ -563,7 +575,7 @@ Important:
                 />
               )}
             </div>
-            <div className="prose max-w-none">
+            <div className="target-container prose max-w-none h-[600px] overflow-y-auto">
               {translations[selectedChunk] ? (
                 mappedParagraphs.target.map(paragraph => (
                   <ParagraphBlock

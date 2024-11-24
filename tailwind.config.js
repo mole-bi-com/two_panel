@@ -9,12 +9,17 @@ module.exports = {
     extend: {
       animation: {
         bounce: 'bounce 1s infinite',
+        'highlight': 'highlight 1s ease-in-out',
       },
       keyframes: {
         bounce: {
           '0%, 100%': { transform: 'translateY(0)' },
           '50%': { transform: 'translateY(-25%)' },
         },
+        highlight: {
+          '0%, 100%': { backgroundColor: 'transparent' },
+          '50%': { backgroundColor: 'rgb(254, 249, 195)' }, // yellow-100
+        }
       },
       colors: {
         primary: {
@@ -29,6 +34,9 @@ module.exports = {
           800: '#075985',
           900: '#0c4a6e',
         },
+      },
+      transitionProperty: {
+        'background': 'background-color',
       },
     },
   },

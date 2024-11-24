@@ -1,58 +1,66 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
 import Link from 'next/link'
-import { Script } from '@/types/script'
-import { Trash2 } from 'lucide-react'
 
-interface ScriptListProps {
-  scripts: Script[]
+interface Script {
+  id: string
+  title: string
+  created_at: string
 }
 
-export default function ScriptList({ scripts }: ScriptListProps) {
-  const [localScripts, setLocalScripts] = useState(scripts)
+export default function ScriptList() {
+  const [scripts, setScripts] = useState<Script[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const supabase = createClientComponentClient()
 
-  const handleDelete = async (scriptId: string) => {
-    try {
-      const response = await fetch(`/api/scripts/${scriptId}`, {
-        method: 'DELETE',
-      })
+  useEffect(() => {
+    async function loadScripts() {
+      try {
+        const { data, error } = await supabase
+          .from('scripts')
+          .select('id, title, created_at')
+          .order('created_at', { ascending: false })
 
-      if (!response.ok) {
-        throw new Error('Failed to delete script')
+        if (error) throw error
+        setScripts(data || [])
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load scripts')
+      } finally {
+        setLoading(false)
       }
-
-      setLocalScripts(prevScripts => 
-        prevScripts.filter(script => script.id !== scriptId)
-      )
-    } catch (error) {
-      console.error('Error deleting script:', error)
-      alert('스크립트 삭제에 실패했습니다.')
     }
-  }
+
+    loadScripts()
+  }, [supabase])
+
+  if (loading) return <div>Loading...</div>
+  if (error) return <div className="text-red-500">{error}</div>
 
   return (
-    <ul className="divide-y divide-gray-200">
-      {localScripts.map((script) => (
-        <li key={script.id} className="py-4 flex justify-between items-center">
-          <Link 
-            href={`/scripts/${script.id}`}
-            className="flex-1 hover:text-blue-600"
-          >
-            <h3 className="text-lg font-medium">{script.title}</h3>
-            <p className="text-sm text-gray-500">
-              완료일: {new Date(script.updatedAt).toLocaleDateString()}
-            </p>
+    <div className="space-y-4">
+      {scripts.map((script) => (
+        <div
+          key={script.id}
+          className="border rounded p-4 hover:bg-gray-50"
+        >
+          <Link href={`/translations/${script.id}/translate`}>
+            <div className="flex justify-between items-center">
+              <h3 className="font-medium">{script.title}</h3>
+              <span className="text-sm text-gray-500">
+                {new Date(script.created_at).toLocaleDateString()}
+              </span>
+            </div>
           </Link>
-          <button
-            onClick={() => handleDelete(script.id)}
-            className="ml-4 p-2 text-gray-400 hover:text-red-600 rounded-full hover:bg-gray-100"
-            aria-label="스크립트 삭제"
-          >
-            <Trash2 className="h-5 w-5" />
-          </button>
-        </li>
+        </div>
       ))}
-    </ul>
+      {scripts.length === 0 && (
+        <div className="text-gray-500 text-center">
+          No scripts found. Create a new one to get started.
+        </div>
+      )}
+    </div>
   )
 } 

@@ -1,47 +1,36 @@
-import { createServerClient } from '@/lib/supabase/server'
-import ScriptList from '@/components/scripts/script-list'
-import { Script } from '@/types/script'
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
 import Link from 'next/link'
-import { Database } from '@/types/supabase'
+import ScriptList from '@/components/script-list'
 
 export default async function ScriptsPage() {
-  const supabase = await createServerClient()
-  
-  const { data: scriptsData, error } = await supabase
+  const cookieStore = cookies()
+  const supabase = createServerComponentClient({ 
+    cookies: () => cookieStore 
+  })
+
+  // 현재 사용자 확인
+  const { data: { user } } = await supabase.auth.getUser()
+
+  // 사용자의 스크립트만 가져오기
+  const { data: scripts } = await supabase
     .from('scripts')
     .select('*')
-    .returns<Database['public']['Tables']['scripts']['Row'][]>()
-
-  if (error) {
-    console.error('Error fetching scripts:', error)
-    return <div>스크립트를 불러오는데 실패했습니다.</div>
-  }
-
-  const scripts: Script[] = scriptsData.map(script => ({
-    id: script.script_id,
-    title: script.title,
-    content: script.original_content,
-    createdAt: script.creation_date,
-    updatedAt: script.updated_at,
-    userId: script.user_id
-  }))
+    .eq('user_id', user?.id)
+    .order('created_at', { ascending: false })
 
   return (
-    <main className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-6">
+    <div className="max-w-4xl mx-auto p-6">
+      <div className="flex justify-between items-center mb-8">
         <h1 className="text-2xl font-bold">스크립트 목록</h1>
-        <Link
-          href="/scripts/new"
-          className="py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+        <Link 
+          href="/scripts/new" 
+          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
         >
           새 스크립트
         </Link>
       </div>
-      {scripts && scripts.length > 0 ? (
-        <ScriptList scripts={scripts} />
-      ) : (
-        <p className="text-gray-500">저장된 스크립트가 없습니다.</p>
-      )}
-    </main>
+      <ScriptList initialScripts={scripts || []} />
+    </div>
   )
 } 

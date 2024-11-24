@@ -1,45 +1,33 @@
+import { cookies } from 'next/headers'
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import { NextResponse } from 'next/server'
-import { createServerClient } from '@/lib/supabase/server'
+import { createScript } from '@/lib/supabase/server'
 
 export async function POST(request: Request) {
-  try {
-    const supabase = await createServerClient()
-    const { title, original_content, translation_tool } = await request.json()
+  const cookieStore = cookies()
+  const supabase = createRouteHandlerClient({ 
+    cookies: () => cookieStore 
+  })
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    
-    if (authError || !user) {
+  try {
+    const formData = await request.json()
+    const newScript = await createScript(formData)
+
+    if (!newScript) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
+        { error: 'Failed to create script' }, 
+        { status: 500 }
       )
     }
 
-    const { data, error } = await supabase
-      .from('scripts')
-      .insert({
-        title,
-        original_content,
-        user_id: user.id,
-        creation_date: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        translated_content: null
-      })
-      .select('*')
-      .single()
-
-    if (error) {
-      throw error
-    }
-
-    return NextResponse.json({
-      script_id: data.script_id,
-      translation_tool
-    })
+    return NextResponse.json(
+      { script_id: newScript.id },
+      { status: 201 }
+    )
   } catch (error) {
     console.error('Error creating script:', error)
     return NextResponse.json(
-      { error: 'Failed to create script' },
+      { error: 'Internal server error' },
       { status: 500 }
     )
   }

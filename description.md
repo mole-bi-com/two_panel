@@ -32,24 +32,31 @@ An advanced translation application specifically designed to convert lengthy Eng
 
 ### 1.3 Translation Engine
 
-- **High-Quality Translation with ChatGPT**
-  - Integration with OpenAI GPT-4 API
-  - Context-aware translation with timestamp information
-  - Timestamp information used to enhance translation accuracy
+- **High-Quality Translation with Gemini**
+  - Integration with Google's Gemini Pro API
+  - Context-aware translation with chunk information
+  - Intelligent text chunking (4000 tokens per chunk)
   - Retry mechanism for failed translations
   - Error handling and validation
 
-- **Real-time Progress Tracking**
-  - Visual progress indicator with circular progress bar
-  - Step-by-step translation status display
-  - Chunk-by-chunk progress tracking
+- **Chunking Strategy**
+  - Automatic splitting of text into manageable chunks
+  - Chunk size optimization for Gemini Pro (4000 tokens)
+  - Sequential chunk numbering for tracking
+  - Context preservation between chunks
+  - Paragraph-aware splitting to maintain readability
+
+- **Translation Progress Tracking**
+  - Real-time progress indicator
+  - Chunk-by-chunk status tracking
+  - Failed chunks retry management
   - Overall progress percentage display
 
 - **Translation Verification**
-  - Basic validation of translation completeness
-  - Sentence pair matching
-  - Translation metrics collection
-  - Error detection and reporting
+  - Completeness check for each chunk
+  - Verification of chunk sequence
+  - Missing content detection
+  - Translation quality metrics
 
 ### 1.4 Dual-Panel Viewer
 

@@ -11,30 +11,79 @@ export interface Database {
     Tables: {
       scripts: {
         Row: {
-          script_id: string
-          user_id: string
+          id: string
           title: string
           original_content: string
-          translated_content: string | null
-          creation_date: string
+          user_id: string
+          created_at: string
           updated_at: string
         }
         Insert: {
-          script_id?: string
-          user_id: string
+          id?: string
           title: string
           original_content: string
-          translated_content?: string | null
-          creation_date?: string
+          user_id: string
+          created_at?: string
           updated_at?: string
         }
         Update: {
-          script_id?: string
-          user_id?: string
+          id?: string
           title?: string
           original_content?: string
-          translated_content?: string | null
-          creation_date?: string
+          user_id?: string
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      translations: {
+        Row: {
+          id: string
+          script_id: string
+          user_id: string
+          status: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          script_id: string
+          user_id: string
+          status?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          script_id?: string
+          user_id?: string
+          status?: string
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      translation_chunks: {
+        Row: {
+          id: string
+          translation_id: string
+          chunk_id: number
+          translated_content: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          translation_id: string
+          chunk_id: number
+          translated_content: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          translation_id?: string
+          chunk_id?: number
+          translated_content?: string
+          created_at?: string
           updated_at?: string
         }
       }

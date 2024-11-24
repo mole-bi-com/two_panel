@@ -164,13 +164,8 @@ const ParagraphBlock = ({
       border border-transparent hover:border-gray-200
     `}
   >
-    <div className="flex flex-col gap-2">
-      <div className="text-xs text-gray-500">
-        <span>문단 {paragraph.id + 1}</span>
-      </div>
-      <div className="text-gray-800 whitespace-pre-wrap">
-        {paragraph.text}
-      </div>
+    <div className="text-gray-800 whitespace-pre-wrap break-words">
+      {paragraph.text}
     </div>
   </div>
 );
@@ -257,47 +252,88 @@ export default function TranslationViewer({ script, translationId }: Translation
   }>({ source: [], target: [] });
   
   const supabase = createClientComponentClient()
-  const chunks = splitIntoChunks(script.original_content)
-  const totalTokens = chunks.reduce((sum, chunk) => sum + chunk.tokens, 0)
+  
+  // chunks 상태 관리 통합
+  const [chunks, setChunks] = useState(() => {
+    const initialChunks = splitIntoChunks(script.original_content);
+    return initialChunks.map(chunk => ({ ...chunk, isTranslated: false }));
+  });
+
+  // 토큰 계산
+  const totalTokens = chunks.reduce((sum, chunk) => sum + chunk.tokens, 0);
   const currentTokens = chunks
     .slice(0, currentChunk + 1)
-    .reduce((sum, chunk) => sum + chunk.tokens, 0)
+    .reduce((sum, chunk) => sum + chunk.tokens, 0);
 
-  // 저장된 번역 불러오기
+  // 저장된 번역 불러오기 - 청크 상태 업데이트 포함
   useEffect(() => {
     async function loadTranslations() {
       try {
-        const { data: chunks, error: chunksError } = await supabase
+        const { data: savedChunks, error: chunksError } = await supabase
           .from('translation_chunks')
           .select('chunk_id, translated_content')
           .eq('translation_id', translationId)
-          .order('chunk_id')
+          .order('chunk_id');
 
-        if (chunksError) throw chunksError
+        if (chunksError) throw chunksError;
 
-        if (chunks?.length > 0) {
-          const loadedTranslations = chunks.reduce((acc, item) => ({
+        if (savedChunks?.length > 0) {
+          const loadedTranslations = savedChunks.reduce((acc, item) => ({
             ...acc,
             [item.chunk_id]: item.translated_content
-          }), {})
+          }), {});
 
-          setTranslations(loadedTranslations)
-          setStatus('completed')
+          setTranslations(loadedTranslations);
+          
+          // 청크 상태 업데이트
+          setChunks(prev => prev.map(chunk => ({
+            ...chunk,
+            isTranslated: !!loadedTranslations[chunk.id]
+          })));
+
+          // 번역된 청크가 있으면 첫 번째 번역된 청크로 이동
+          const firstTranslatedChunk = savedChunks[0].chunk_id;
+          setSelectedChunk(firstTranslatedChunk);
+          setStatus('completed');
         }
       } catch (err) {
-        console.error('Error loading translations:', err)
-        setError('번역 데이터 로드 중 오류 발생')
+        console.error('Error loading translations:', err);
+        setError('번역 데이터 로드 중 오류 발생');
       }
     }
 
-    loadTranslations()
-  }, [translationId])
+    loadTranslations();
+  }, [translationId]);
 
-  // 번역 저장 함수
+  // 번역 저장 함수 개선
   async function saveTranslationToDb(chunkId: number, text: string) {
     try {
       setIsSaving(true);
-      const { error } = await supabase
+      console.log('Saving translation:', { translationId, chunkId, text });
+
+      // 1. translations 테이블 확인/생성
+      const { data: translationData, error: translationCheckError } = await supabase
+        .from('translations')
+        .select('*')
+        .eq('id', translationId)
+        .single();
+
+      if (translationCheckError && translationCheckError.code === 'PGRST116') {
+        // translations 레코드가 없으면 생성
+        const { error: createError } = await supabase
+          .from('translations')
+          .insert({
+            id: translationId,
+            script_id: script.id,
+            status: 'pending',
+            user_id: (await supabase.auth.getUser()).data.user?.id
+          });
+
+        if (createError) throw createError;
+      }
+
+      // 2. translation_chunks에 번역 내용 저장
+      const { error: chunkError } = await supabase
         .from('translation_chunks')
         .upsert({
           translation_id: translationId,
@@ -308,12 +344,23 @@ export default function TranslationViewer({ script, translationId }: Translation
           onConflict: 'translation_id,chunk_id'
         });
 
-      if (error) throw error;
+      if (chunkError) throw chunkError;
 
-      // 모든 청크가 번역되었는지 확인
-      const isAllTranslated = chunks.every(chunk => translations[chunk.id]);
-      
-      if (isAllTranslated) {
+      // 3. 모든 청크의 번역 상태 확인
+      const { data: translatedChunks, error: countError } = await supabase
+        .from('translation_chunks')
+        .select('chunk_id')
+        .eq('translation_id', translationId);
+
+      if (countError) throw countError;
+
+      // 4. 모든 청크가 번역되었는지 확인
+      const allChunksTranslated = translatedChunks.length === chunks.length;
+
+      if (allChunksTranslated) {
+        console.log('All chunks translated, updating status to completed');
+        
+        // 5. translations 테이블 상태 업데이트
         const { error: statusError } = await supabase
           .from('translations')
           .update({ 
@@ -323,10 +370,19 @@ export default function TranslationViewer({ script, translationId }: Translation
           .eq('id', translationId);
 
         if (statusError) throw statusError;
+        
         setStatus('completed');
+        console.log('Translation status updated to completed');
       }
+
+      // 6. UI 상태 업데이트
+      setTranslations(prev => ({
+        ...prev,
+        [chunkId]: text
+      }));
+
     } catch (error) {
-      console.error('Error saving translation:', error);
+      console.error('Error in saveTranslationToDb:', error);
       throw error;
     } finally {
       setIsSaving(false);
@@ -343,8 +399,13 @@ export default function TranslationViewer({ script, translationId }: Translation
       setError(null);
       
       try {
+        let translationSuccess = true; // 번역 성공 여부 추적
+
         for (const chunk of chunks) {
-          if (translations[chunk.id]) continue;
+          if (translations[chunk.id]) {
+            chunk.isTranslated = true;
+            continue;
+          }
           
           setCurrentChunk(chunk.id);
           
@@ -362,7 +423,7 @@ export default function TranslationViewer({ script, translationId }: Translation
               // 시간 마커를 포함한 프롬프트 생성
               const prompt = `
 Translate the following English text to Korean.
-Context: This is part ${i + 1} of 4 from a larger text.
+Context: This is part ${i + 1} of ${chunk.subChunks.length} from a larger text.
 Requirements:
 - Preserve the exact timestamp markers (e.g., (12:34))
 - Maintain academic/professional tone
@@ -399,6 +460,7 @@ Important:
 
             } catch (subError) {
               console.error(`SubChunk translation error:`, subError);
+              translationSuccess = false;
               translatedSubChunks.push({
                 ...subChunk,
                 translation: `[번역 실패] ${subChunk.text}`
@@ -412,37 +474,27 @@ Important:
             .filter(Boolean)
             .join('\n\n');
           
-          // 번역 결과 저장
-          await saveTranslationToDb(chunk.id, completeTranslation);
+          // 번역이 성공적으로 완료된 경우에만 저장
+          if (translationSuccess) {
+            await saveTranslationToDb(chunk.id, completeTranslation);
+          }
+
+          // 번역 완료 후 청크 상태 업데이트
+          setChunks(prev => prev.map(c => 
+            c.id === chunk.id ? { ...c, isTranslated: translationSuccess } : c
+          ));
+
+          // 번역 결과 상태 업데이트
           setTranslations(prev => ({
             ...prev,
             [chunk.id]: completeTranslation
           }));
-
-          // 매핑 업데이트
-          setMappedParagraphs(prev => ({
-            source: chunk.subChunks.map(subChunk => ({
-              id: subChunk.id,
-              text: subChunk.text,
-              timeMarker: subChunk.timeMarker,
-              isHighlighted: false,
-              charCount: subChunk.text.length
-            })),
-            target: translatedSubChunks.map(subChunk => ({
-              id: subChunk.id,
-              text: subChunk.translation || '',
-              timeMarker: subChunk.timeMarker,
-              isHighlighted: false,
-              charCount: (subChunk.translation || '').length
-            }))
-          }));
         }
 
-        setStatus('completed');
+        setStatus(translationSuccess ? 'completed' : 'error');
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다';
         console.error('Translation error:', err);
-        setError(`번역 중 오류 발생: ${errorMessage}`);
+        setError(`번역 중 오류 발생: ${err instanceof Error ? err.message : '알 수 없는 오류'}`);
         setStatus('error');
       } finally {
         setIsTranslating(false);
@@ -456,6 +508,10 @@ Important:
   const handleParagraphClick = (id: number, isSource: boolean) => {
     console.log('Paragraph clicked:', { id, isSource });
     
+    // 이전 상태를 기반으로 업데이트
+    setSelectedSentenceId(prevId => prevId === id ? null : id);
+    
+    // 문단 하이라이트 업데이트
     setMappedParagraphs(prev => {
       const newSource = prev.source.map(p => ({
         ...p,
@@ -466,26 +522,85 @@ Important:
         isHighlighted: p.id === id
       }));
 
+      // 이전 상태와 동하면 업데이트하지 않음
+      if (JSON.stringify(prev) === JSON.stringify({ source: newSource, target: newTarget })) {
+        return prev;
+      }
+
       return { source: newSource, target: newTarget };
     });
 
-    // 선택된 문단을 양쪽 패널의 상단으로 스크롤
-    const sourceElement = document.getElementById(`source-${id}`);
-    const targetElement = document.getElementById(`target-${id}`);
-    const sourceContainer = document.querySelector('.source-container');
-    const targetContainer = document.querySelector('.target-container');
+    // 스크롤 동기화는 requestAnimationFrame 내에서 처리
+    requestAnimationFrame(() => {
+      const sourceElement = document.getElementById(`source-${id}`);
+      const targetElement = document.getElementById(`target-${id}`);
+      const sourceContainer = document.querySelector('.source-container');
+      const targetContainer = document.querySelector('.target-container');
 
-    if (sourceElement && targetElement && sourceContainer && targetContainer) {
-      // 부드러운 스크롤 효과
-      sourceContainer.scrollTo({
-        top: sourceElement.offsetTop - sourceContainer.offsetTop - 20, // 20px 여백
-        behavior: 'smooth'
-      });
+      if (sourceElement && targetElement && sourceContainer && targetContainer) {
+        const sourceTop = sourceElement.offsetTop - 20;
+        const targetTop = targetElement.offsetTop - 20;
 
-      targetContainer.scrollTo({
-        top: targetElement.offsetTop - targetContainer.offsetTop - 20, // 20px 여백
-        behavior: 'smooth'
+        sourceContainer.scrollTo({
+          top: sourceTop,
+          behavior: 'smooth'
+        });
+
+        targetContainer.scrollTo({
+          top: targetTop,
+          behavior: 'smooth'
+        });
+      }
+    });
+  };
+
+  // 문단 매핑 생성 - 의존성 배열 수정
+  useEffect(() => {
+    if (!translations[selectedChunk] || !chunks[selectedChunk]) return;
+
+    try {
+      const sourceText = chunks[selectedChunk].text;
+      const targetText = translations[selectedChunk];
+
+      // 원문과 번역문을 500자 단위로 분할
+      const sourceParagraphs = splitIntoFixedCharacters(sourceText, 500);
+      
+      // 번역문을 원문 문단 수에 맞춰 분할
+      const targetParagraphs = targetText
+        .split(/\n\s*\n/)
+        .map((text, id) => ({
+          id,
+          text: text.trim(),
+          timeMarker: sourceParagraphs[id]?.timeMarker,
+          isHighlighted: false,
+          charCount: text.length
+        }))
+        .slice(0, sourceParagraphs.length);
+
+      // 이전 상태와 비교하여 변경이 있을 때만 업데이트
+      setMappedParagraphs(prev => {
+        const sourceChanged = JSON.stringify(prev.source) !== JSON.stringify(sourceParagraphs);
+        const targetChanged = JSON.stringify(prev.target) !== JSON.stringify(targetParagraphs);
+        
+        if (sourceChanged || targetChanged) {
+          return {
+            source: sourceParagraphs,
+            target: targetParagraphs
+          };
+        }
+        return prev;
       });
+    } catch (error) {
+      console.error('Error mapping paragraphs:', error);
+    }
+  }, [selectedChunk, chunks[selectedChunk]?.text, translations[selectedChunk]]); // 의존성 배열 수정
+
+  // 청크 네비게이션 개선
+  const handleChunkChange = (newChunkId: number) => {
+    if (newChunkId >= 0 && newChunkId < chunks.length) {
+      setSelectedChunk(newChunkId);
+      // 문단 매핑 초기화
+      setMappedParagraphs({ source: [], target: [] });
     }
   };
 
@@ -552,7 +667,7 @@ Important:
               />
             </div>
             <div className="source-container prose max-w-none h-[600px] overflow-y-auto">
-              {mappedParagraphs.source.map(paragraph => (
+              {chunks[selectedChunk]?.text && mappedParagraphs.source.map(paragraph => (
                 <ParagraphBlock
                   key={`source-${paragraph.id}`}
                   paragraph={paragraph}
@@ -576,32 +691,15 @@ Important:
               )}
             </div>
             <div className="target-container prose max-w-none h-[600px] overflow-y-auto">
-              {translations[selectedChunk] ? (
-                mappedParagraphs.target.map(paragraph => (
-                  <ParagraphBlock
-                    key={`target-${paragraph.id}`}
-                    paragraph={paragraph}
-                    onClick={() => handleParagraphClick(paragraph.id, false)}
-                    isHighlighted={paragraph.isHighlighted}
-                    isSource={false}
-                  />
-                ))
-              ) : (
-                <div className="h-full flex items-center justify-center text-gray-500">
-                  {status === 'translating' && currentChunk === selectedChunk ? (
-                    <div className="flex items-center text-blue-500">
-                      <span className="mr-3">번역 중</span>
-                      <div className="flex space-x-1">
-                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                      </div>
-                    </div>
-                  ) : (
-                    '대기 중...'
-                  )}
-                </div>
-              )}
+              {translations[selectedChunk] && mappedParagraphs.target.map(paragraph => (
+                <ParagraphBlock
+                  key={`target-${paragraph.id}`}
+                  paragraph={paragraph}
+                  onClick={() => handleParagraphClick(paragraph.id, false)}
+                  isHighlighted={paragraph.isHighlighted}
+                  isSource={false}
+                />
+              ))}
             </div>
           </div>
         </div>

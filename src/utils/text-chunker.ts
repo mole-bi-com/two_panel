@@ -5,6 +5,7 @@ interface SubChunk {
   text: string;
   timeMarker?: string;
   translation?: string;
+  tokens: number;
 }
 
 interface Chunk {
@@ -12,88 +13,85 @@ interface Chunk {
   text: string;
   tokens: number;
   subChunks: SubChunk[];
+  isTranslated?: boolean;
 }
 
-// 시간 마커를 포함한 문장 단위로 텍스트 분할
-function splitByTimeMarkers(text: string): string[] {
-  const timeMarkerPattern = /\(\d{2}:\d{2}\)/;
-  return text
-    .split(/(?=\(\d{2}:\d{2}\))/)
-    .map(part => part.trim())
-    .filter(part => part.length > 0);
+function calculateTokens(text: string): number {
+  return encode(text).length;
 }
 
-// 청크를 4개의 서브청크로 분할
-function splitChunkIntoSubChunks(chunkText: string): SubChunk[] {
-  const parts = splitByTimeMarkers(chunkText);
+// 청크를 정확히 400토큰 단위의 서브청크로 나누는 함수
+function splitIntoSubChunks(text: string, targetTokens: number = 400): SubChunk[] {
   const subChunks: SubChunk[] = [];
+  const timeMarkerRegex = /\((\d{2}:\d{2})\)/g;
   
-  // 전체 텍스트 길이 계산
-  const totalLength = parts.reduce((sum, part) => sum + part.length, 0);
-  const targetLength = Math.ceil(totalLength / 4);
-  
-  let currentSubChunk = '';
-  let currentLength = 0;
+  let remainingText = text;
   let subChunkId = 0;
+  let currentTokens = 0;
+  let currentText = '';
 
-  for (const part of parts) {
-    const timeMarker = part.match(/\(\d{2}:\d{2}\)/)?.[0];
-    
-    if (currentLength + part.length > targetLength && currentSubChunk) {
-      // 현재 서브청크가 목표 길이에 도달하면 저장
+  // 단어 단위로 처리하여 토큰 수 계산
+  const words = text.split(/\s+/);
+  
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const wordWithSpace = word + ' ';
+    const wordTokens = calculateTokens(wordWithSpace);
+
+    // 현재 토큰 수가 목표치를 초과하는 경우
+    if (currentTokens + wordTokens > targetTokens && currentText) {
+      // 문장이 완성되지 않은 경우 다음 문장 끝까지 포함
+      const remainingWords = words.slice(i).join(' ');
+      const nextSentenceEnd = remainingWords.match(/[.!?]\s+/);
+      
+      if (nextSentenceEnd) {
+        const additionalText = words
+          .slice(i, i + remainingWords.indexOf(nextSentenceEnd[0]) + 1)
+          .join(' ');
+        currentText += ' ' + additionalText;
+        i += additionalText.split(/\s+/).length - 1;
+      }
+
+      // 서브청크 추가
+      const timeMarker = currentText.match(timeMarkerRegex)?.[0];
+      const finalTokens = calculateTokens(currentText);
+
       subChunks.push({
         id: subChunkId++,
-        text: currentSubChunk.trim(),
-        timeMarker: currentSubChunk.match(/\(\d{2}:\d{2}\)/)?.[0]
+        text: currentText.trim(),
+        timeMarker,
+        tokens: finalTokens
       });
-      currentSubChunk = part;
-      currentLength = part.length;
-    } else {
-      // 아직 목표 길이에 도달하지 않았으면 계속 추가
-      currentSubChunk += (currentSubChunk ? ' ' : '') + part;
-      currentLength += part.length;
+
+      // 초기화
+      currentText = '';
+      currentTokens = 0;
+      continue;
+    }
+
+    currentText += (currentText ? ' ' : '') + word;
+    currentTokens += wordTokens;
+
+    // 마지막 단어 처리
+    if (i === words.length - 1 && currentText) {
+      const timeMarker = currentText.match(timeMarkerRegex)?.[0];
+      const finalTokens = calculateTokens(currentText);
+
+      subChunks.push({
+        id: subChunkId++,
+        text: currentText.trim(),
+        timeMarker,
+        tokens: finalTokens
+      });
     }
   }
 
-  // 마지막 서브청크 처리
-  if (currentSubChunk) {
-    subChunks.push({
-      id: subChunkId,
-      text: currentSubChunk.trim(),
-      timeMarker: currentSubChunk.match(/\(\d{2}:\d{2}\)/)?.[0]
-    });
-  }
+  // 디버깅을 위한 토큰 수 로깅
+  subChunks.forEach(chunk => {
+    console.log(`SubChunk ${chunk.id} tokens:`, chunk.tokens);
+  });
 
-  // 서브청크가 4개보다 적으면 남은 부분을 균등하게 분배
-  while (subChunks.length < 4) {
-    // 가장 긴 서브청크를 찾아서 분할
-    const longestIndex = subChunks
-      .map((chunk, index) => ({ index, length: chunk.text.length }))
-      .reduce((a, b) => a.length > b.length ? a : b)
-      .index;
-    
-    const chunkToSplit = subChunks[longestIndex];
-    const splitPoint = Math.ceil(chunkToSplit.text.length / 2);
-    
-    const firstHalf = chunkToSplit.text.slice(0, splitPoint);
-    const secondHalf = chunkToSplit.text.slice(splitPoint);
-    
-    subChunks.splice(longestIndex, 1,
-      {
-        id: chunkToSplit.id,
-        text: firstHalf.trim(),
-        timeMarker: firstHalf.match(/\(\d{2}:\d{2}\)/)?.[0]
-      },
-      {
-        id: subChunks.length,
-        text: secondHalf.trim(),
-        timeMarker: secondHalf.match(/\(\d{2}:\d{2}\)/)?.[0]
-      }
-    );
-  }
-
-  // 정확히 4개의 서브청크만 반환
-  return subChunks.slice(0, 4);
+  return subChunks;
 }
 
 export function splitIntoChunks(text: string, maxTokens: number = 8000): Chunk[] {
@@ -102,7 +100,6 @@ export function splitIntoChunks(text: string, maxTokens: number = 8000): Chunk[]
   let currentTokenCount = 0;
   let chunkId = 0;
 
-  // 줄 단위로 분리
   const lines = text.split('\n');
 
   for (const line of lines) {
@@ -114,7 +111,8 @@ export function splitIntoChunks(text: string, maxTokens: number = 8000): Chunk[]
           id: chunkId++,
           text: currentChunk.trim(),
           tokens: currentTokenCount,
-          subChunks: splitChunkIntoSubChunks(currentChunk)
+          subChunks: splitIntoSubChunks(currentChunk),
+          isTranslated: false
         });
         currentChunk = '';
         currentTokenCount = 0;
@@ -125,33 +123,34 @@ export function splitIntoChunks(text: string, maxTokens: number = 8000): Chunk[]
     currentTokenCount += lineTokens;
   }
 
-  // 마지막 청크 추가
   if (currentChunk) {
     chunks.push({
       id: chunkId,
       text: currentChunk.trim(),
       tokens: currentTokenCount,
-      subChunks: splitChunkIntoSubChunks(currentChunk)
+      subChunks: splitIntoSubChunks(currentChunk),
+      isTranslated: false
     });
   }
 
   return chunks;
 }
 
-// 번역된 텍스트를 서브청크에 매핑
+// 번역된 텍스트를 원본 서브청크에 맞게 매핑
 export function mapTranslationToSubChunks(chunk: Chunk, translatedText: string): SubChunk[] {
-  const translatedParts = splitByTimeMarkers(translatedText);
   const subChunkCount = chunk.subChunks.length;
-  const partsPerSubChunk = Math.ceil(translatedParts.length / subChunkCount);
-  
+  const totalLength = translatedText.length;
+  const baseLength = Math.ceil(totalLength / subChunkCount);
+
   return chunk.subChunks.map((subChunk, index) => {
-    const start = index * partsPerSubChunk;
-    const end = Math.min(start + partsPerSubChunk, translatedParts.length);
-    const translatedSubChunk = translatedParts.slice(start, end).join(' ');
-    
+    const start = index * baseLength;
+    const end = index === subChunkCount - 1 
+      ? totalLength 
+      : Math.min(start + baseLength, totalLength);
+
     return {
       ...subChunk,
-      translation: translatedSubChunk
+      translation: translatedText.slice(start, end).trim()
     };
   });
 } 
